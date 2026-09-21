@@ -1,4 +1,4 @@
-from selenium import webdriver
+﻿from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 import re
 import time
+import requests
 
 # =========================================
 # ChromeDriver設定
@@ -21,6 +22,8 @@ driver_path = Path(__file__).resolve().parent / "chromedriver.exe"
 service = Service(
     executable_path=str(driver_path)
 )
+
+headers = {"User-Agent": "Mozilla/5.0"}
 
 options = Options()
 options.add_argument("--user-agent=Mozilla/5.0")
@@ -109,24 +112,43 @@ def get_shop_info(gnavi_url):
     # =====================================
     email = ""
 
-    try:
+    # 「お店に直接メールする」の
+    # mailto: だけを取得する
+    # ページ本文中の別メールは取得しない
+    links = driver.find_elements(
+        By.TAG_NAME,
+        "a"
+    )
 
-        body_text = driver.find_element(
-            By.TAG_NAME,
-            "body"
-        ).text
+    for link in links:
 
-        email_match = re.search(
-            r"[A-Za-z0-9._%+-]+@"
-            r"[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-            body_text
-        )
+        try:
 
-        if email_match:
-            email = email_match.group()
+            href = (
+                link.get_attribute("href")
+                or ""
+            ).strip()
 
-    except Exception:
-        pass
+            link_text = (
+                link.text
+                or ""
+            ).strip()
+
+            if (
+                href.lower().startswith("mailto:")
+                and "お店に直接メールする" in link_text
+            ):
+
+                email = (
+                    href[7:]
+                    .split("?")[0]
+                    .strip()
+                )
+
+                break
+
+        except StaleElementReferenceException:
+            continue
 
 
     # =====================================
@@ -198,78 +220,71 @@ def get_shop_info(gnavi_url):
     )
 
     if pref_match:
+
         prefecture = pref_match.group(1)
 
-
-    remaining_address = address_text
-
-    if prefecture:
-
         remaining_address = (
-            remaining_address[
-                len(prefecture):
-            ]
+            address_text[len(prefecture):]
         )
-
-
-    # =====================================
-    # 市区町村
-    # 四日市市などにも対応
-    # =====================================
-    city = ""
-
-    city_match = re.match(
-        r"^("
-        r".+?市市"
-        r"|.+?市.+?区"
-        r"|.+?市"
-        r"|.+?区"
-        r"|.+?町"
-        r"|.+?村"
-        r")",
-        remaining_address
-    )
-
-    if city_match:
-        city = city_match.group(1)
-
-
-    # 市区町村を除く
-    street_and_building = (
-        remaining_address
-    )
-
-    if city:
-
-        street_and_building = (
-            street_and_building[
-                len(city):
-            ]
-        )
-
-
-    # =====================================
-    # 番地・建物名
-    # =====================================
-    street = ""
-    building = ""
-
-    address_match = re.match(
-        r"^(\S+?[\d０-９]+"
-        r"(?:[-－ー]\d+)*)"
-        r"(?:\s+(.+))?$",
-        street_and_building
-    )
-
-    if address_match:
-
-        street = address_match.group(1)
-
-        if address_match.group(2):
-            building = address_match.group(2)
 
     else:
-        street = street_and_building
+
+        remaining_address = address_text
+
+
+    # =====================================
+    # 建物名
+    # =====================================
+    parts = remaining_address.split(
+        " ",
+        1
+    )
+
+    main_address = parts[0]
+
+    building = (
+        parts[1]
+        if len(parts) == 2
+        else ""
+    )
+
+
+    # =====================================
+    # 市区町村（町名まで）・番地
+    # =====================================
+    city = ""
+    street = ""
+
+    # 例：
+    # 北海道旭川市2条通8-569-1
+    # → 旭川市 / 2条通8-569-1
+    special_match = re.match(
+        r"^(.+?市)(\d+条(?:通)?\d+(?:[-－ー]\d+)*)$",
+        main_address
+    )
+
+    if special_match:
+
+        city = special_match.group(1)
+        street = special_match.group(2)
+
+    else:
+
+        # 原則として番地の数字が始まる直前までを
+        # 「市区町村」欄に入れる
+        normal_match = re.match(
+            r"^(.+?)(\d+(?:[-－ー]\d+)*)$",
+            main_address
+        )
+
+        if normal_match:
+
+            city = normal_match.group(1)
+            street = normal_match.group(2)
+
+        else:
+
+            city = main_address
 
 
     # =====================================
@@ -277,7 +292,10 @@ def get_shop_info(gnavi_url):
     # =====================================
     official_url = ""
 
-    official_link = None
+    # 「お店のホームページ」を優先し、
+    # なければ「オフィシャルページ」を使用する
+    homepage_link = None
+    official_page_link = None
 
     links = driver.find_elements(
         By.TAG_NAME,
@@ -288,24 +306,75 @@ def get_shop_info(gnavi_url):
 
         try:
 
-            text = link.text.strip()
+            text_value = (
+                link.text
+                or ""
+            ).strip()
+
+            href = (
+                link.get_attribute("href")
+                or ""
+            ).strip()
+
+            # # や javascript: は
+            # 公式URL候補として扱わない
+            if (
+                not href
+                or href == "#"
+                or href.lower().startswith(
+                    "javascript:"
+                )
+            ):
+                continue
 
             if (
-                "オフィシャル" in text
-                or "ホームページ" in text
+                "お店のホームページ" in text_value
+                and homepage_link is None
             ):
 
-                official_link = link
-                break
+                homepage_link = link
+
+            elif (
+                "オフィシャル" in text_value
+                and official_page_link is None
+            ):
+
+                official_page_link = link
 
         except StaleElementReferenceException:
             continue
 
 
+    if homepage_link is not None:
+        official_link = homepage_link
+
+    else:
+        official_link = official_page_link
+
+
     # =====================================
     # 実際にリンクをブラウザで開く
     # =====================================
-    if official_link:
+    if official_link is not None:
+
+        # クリックに失敗しても保持できるように、
+        # 先にリンク自身のURLを保存する
+        try:
+
+            original_official_url = (
+                official_link.get_attribute("href")
+                or ""
+            ).strip()
+
+        except StaleElementReferenceException:
+
+            original_official_url = ""
+
+
+        if original_official_url:
+
+            official_url = original_official_url
+
 
         try:
 
@@ -316,15 +385,16 @@ def get_shop_info(gnavi_url):
                 official_link
             )
 
-            time.sleep(1)
+            # クリック前に3秒待機
+            time.sleep(3)
 
             driver.execute_script(
                 "arguments[0].click();",
                 official_link
             )
 
+            # 遷移完了待ち
             time.sleep(3)
-
 
             new_handles = driver.window_handles
 
@@ -343,10 +413,47 @@ def get_shop_info(gnavi_url):
                 )
 
 
-            # 実際に表示されたURL
-            official_url = (
+            displayed_url = (
                 driver.current_url
+                or ""
+            ).strip()
+
+
+            # CAPTCHA・認証ページなどを
+            # 店舗URLとして保存しない
+            suspicious_words = (
+                "captcha",
+                "challenge",
+                "verify",
+                "verification"
             )
+
+            displayed_url_lower = (
+                displayed_url.lower()
+            )
+
+            suspicious_redirect = any(
+                word in displayed_url_lower
+                for word in suspicious_words
+            )
+
+
+            if (
+                displayed_url
+                and not suspicious_redirect
+            ):
+
+                official_url = displayed_url
+
+            elif suspicious_redirect:
+
+                print(
+                    "URL確認:",
+                    original_official_url,
+                    "-> 不適切な転送先のため"
+                    "元URLを保持:",
+                    displayed_url
+                )
 
 
             # 新しいタブなら閉じて元へ戻す
@@ -359,9 +466,19 @@ def get_shop_info(gnavi_url):
                 )
 
 
-        except WebDriverException:
+        except WebDriverException as e:
 
-            official_url = ""
+            # ブラウザ遷移に失敗した場合も
+            # 元の外部URLは消さない
+            official_url = (
+                original_official_url
+            )
+
+            print(
+                "公式URLブラウザ確認失敗:",
+                original_official_url,
+                e
+            )
 
 
     # =====================================
@@ -369,10 +486,120 @@ def get_shop_info(gnavi_url):
     # =====================================
     ssl = False
 
-    if official_url.startswith(
-        "https://"
-    ):
-        ssl = True
+    if official_url:
+
+        url_for_ssl_check = official_url
+
+        try:
+
+            # SSL確認のアクセス前にも3秒待機
+            time.sleep(3)
+
+            # requestsはデフォルトでverify=True。
+            # HTTPS証明書検証に成功した場合だけ
+            # SSL=Trueとする。
+            ssl_response = requests.get(
+                url_for_ssl_check,
+                headers=headers,
+                timeout=10,
+                allow_redirects=True
+            )
+
+            final_ssl_url = (
+                ssl_response.url
+                or ""
+            ).strip()
+
+            final_ssl_url_lower = (
+                final_ssl_url.lower()
+            )
+
+            suspicious_words = (
+                "captcha",
+                "challenge",
+                "verify",
+                "verification"
+            )
+
+            suspicious_ssl_redirect = any(
+                word in final_ssl_url_lower
+                for word in suspicious_words
+            )
+
+
+            # CAPTCHA等へ飛ばされた場合は、
+            # その転送先を店舗URLにしない
+            if suspicious_ssl_redirect:
+
+                print(
+                    "SSL確認:",
+                    url_for_ssl_check,
+                    "-> 不適切な転送先:",
+                    final_ssl_url
+                )
+
+                ssl = False
+
+            elif (
+                final_ssl_url.lower().startswith(
+                    "https://"
+                )
+                and ssl_response.ok
+            ):
+
+                # 実際に証明書検証済みHTTPS接続が
+                # 成功した場合のみTrue
+                ssl = True
+
+                # 正常なリダイレクト先なら
+                # 実際の最終URLを保存
+                official_url = final_ssl_url
+
+            else:
+
+                ssl = False
+
+                print(
+                    "SSL確認失敗:",
+                    url_for_ssl_check,
+                    "status=",
+                    ssl_response.status_code,
+                    "final_url=",
+                    final_ssl_url
+                )
+
+
+        except requests.exceptions.SSLError as e:
+
+            ssl = False
+
+            print(
+                "SSL証明書エラー:",
+                url_for_ssl_check,
+                e
+            )
+
+
+        except requests.exceptions.Timeout as e:
+
+            ssl = False
+
+            print(
+                "接続タイムアウト:",
+                url_for_ssl_check,
+                e
+            )
+
+
+        except requests.RequestException as e:
+
+            ssl = False
+
+            print(
+                "URL接続エラー:",
+                url_for_ssl_check,
+                e
+            )
 
 
     # =====================================
@@ -404,12 +631,13 @@ driver.get(search_url)
 
 
 # =========================================
-# 店舗URLを50件取得
+# 有効50店舗を確保するため
+# 候補店舗URLを最大100件取得
 # =========================================
 shop_urls = []
 
 
-while len(shop_urls) < 50:
+while len(shop_urls) < 100:
 
     time.sleep(3)
 
@@ -461,14 +689,14 @@ while len(shop_urls) < 50:
                     href
                 )
 
-                if len(shop_urls) >= 50:
+                if len(shop_urls) >= 100:
                     break
 
 
     # =====================================
-    # 50件取得したら終了
+    # 候補URLを100件取得したら終了
     # =====================================
-    if len(shop_urls) >= 50:
+    if len(shop_urls) >= 100:
         break
 
 
@@ -512,12 +740,6 @@ while len(shop_urls) < 50:
                 "href"
             )
 
-            text = link.text.strip()
-
-            aria_label = link.get_attribute(
-                "aria-label"
-            )
-
         except StaleElementReferenceException:
 
             continue
@@ -527,50 +749,49 @@ while len(shop_urls) < 50:
             continue
 
 
-        if (
-            text == ">"
-            or aria_label == "次へ"
-        ):
+        # =====================================
+        # ページ下部の「>」ボタンを識別
+        # =====================================
+        # 画面上では「>」だが、
+        # HTMLではリンク内のimg要素として
+        # 表示されている。
+        #
+        # ページ番号「2」などのリンクではなく、
+        # alt="次（2）ページを表示"
+        # の画像を持つリンクだけを対象にする。
+        try:
 
-            next_button = link
-            break
+            images = link.find_elements(
+                By.TAG_NAME,
+                "img"
+            )
 
+            for image in images:
 
-    # =====================================
-    # > が取得できない場合
-    # 次ページURLを持つリンクを探す
-    # =====================================
-    if next_button is None:
+                alt_text = (
+                    image.get_attribute("alt")
+                    or ""
+                ).strip()
 
-        for link in links:
+                if re.match(
+                    r"^次（\d+）ページを表示$",
+                    alt_text
+                ):
 
-            try:
+                    next_button = link
+                    break
 
-                href = link.get_attribute(
-                    "href"
-                )
-
-            except StaleElementReferenceException:
-
-                continue
-
-
-            if not href:
-                continue
-
-
-            if (
-                f"?p={next_page}" in href
-                or
-                f"&p={next_page}" in href
-            ):
-
-                next_button = link
+            if next_button is not None:
                 break
 
+        except StaleElementReferenceException:
+
+            continue
+
 
     # =====================================
-    # 次ページがない場合
+    # 「>」がない場合は終了
+    # ページ番号リンクでは代用しない
     # =====================================
     if next_button is None:
 
@@ -592,7 +813,8 @@ while len(shop_urls) < 50:
         next_button
     )
 
-    time.sleep(1)
+    # クリック前に3秒待機
+    time.sleep(3)
 
     driver.execute_script(
         "arguments[0].click();",
@@ -619,7 +841,7 @@ print(
 
 
 # =========================================
-# 50店舗の詳細情報を取得
+# 有効な店舗が50件になるまで詳細情報を取得
 # =========================================
 results = []
 
@@ -629,10 +851,15 @@ for i, url in enumerate(
     start=1
 ):
 
+    # 有効店舗が50件そろったら終了
+    if len(results) >= 50:
+        break
+
+
     print()
     print(
-        f"{i}/{len(shop_urls)}"
-        " 店舗目を取得中"
+        f"候補 {i}/{len(shop_urls)}"
+        " を取得中"
     )
 
     print(url)
@@ -644,37 +871,60 @@ for i, url in enumerate(
             get_shop_info(url)
         )
 
-        results.append(
-            shop_data
-        )
 
-        print(
-            "取得完了:",
+        # =====================================
+        # 有効店舗か確認
+        # =====================================
+        # メール・公式URLは存在しない店舗もあるため
+        # 必須条件にはしない。
+        # 店舗名・都道府県・市区町村が取得できた
+        # 店舗だけを有効店舗として採用する。
+        if (
             shop_data["店舗名"]
-        )
+            and shop_data["都道府県"]
+            and shop_data["市区町村"]
+        ):
+
+            results.append(
+                shop_data
+            )
+
+            print(
+                "有効店舗:",
+                len(results),
+                "/50",
+                shop_data["店舗名"]
+            )
+
+        else:
+
+            print(
+                "無効店舗のためスキップ:",
+                url
+            )
 
 
     except Exception as e:
 
+        # 失敗店舗を空行として追加しない。
+        # 次の候補店舗へ進む。
         print(
-            "取得エラー:",
+            "取得エラー・スキップ:",
             url,
             e
         )
 
-        results.append(
-            {
-                "店舗名": "",
-                "電話番号": "",
-                "メールアドレス": "",
-                "都道府県": "",
-                "市区町村": "",
-                "番地": "",
-                "建物名": "",
-                "URL": "",
-                "SSL": False
-            }
-        )
+
+# =========================================
+# 50件に達したか確認
+# =========================================
+if len(results) < 50:
+
+    raise RuntimeError(
+        "有効店舗が50件に達しませんでした。"
+        f" 取得数={len(results)}"
+        f" 候補数={len(shop_urls)}"
+    )
 
 
 # =========================================

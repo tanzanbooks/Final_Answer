@@ -5,23 +5,90 @@ import re
 import time
 
 
+# =========================================
+# 基本設定
+# =========================================
+
 headers = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/152.0.0.0 Safari/537.36"
+    )
 }
+
+
+# =========================================
+# Webページを取得する関数
+# 最大3回まで再試行する
+# =========================================
+
+def get_response(url, retries=3):
+
+    for attempt in range(1, retries + 1):
+
+        try:
+            # 課題指定：アクセス前に3秒待機
+            time.sleep(3)
+
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=20
+            )
+
+            response.raise_for_status()
+
+            return response
+
+        except requests.RequestException as e:
+
+            print(
+                f"通信エラー "
+                f"{attempt}/{retries}:",
+                url
+            )
+
+            print(e)
+
+            if attempt < retries:
+                print("3秒後に再試行します。")
+
+    # 3回すべて失敗した場合
+    return None
 
 
 # =========================================
 # 1店舗の情報を取得する関数
 # =========================================
+
 def get_shop_info(gnavi_url):
 
-    time.sleep(3)
+    response = get_response(gnavi_url)
 
-    response = requests.get(
-        gnavi_url,
-        headers=headers,
-        timeout=10
-    )
+    # =====================================
+    # 店舗ページを取得できなかった場合
+    # =====================================
+
+    if response is None:
+
+        print(
+            "店舗ページを取得できなかったため、"
+            "空欄データとして保存します:",
+            gnavi_url
+        )
+
+        return {
+            "店舗名": "",
+            "電話番号": "",
+            "メールアドレス": "",
+            "都道府県": "",
+            "市区町村": "",
+            "番地": "",
+            "建物名": "",
+            "URL": "",
+            "SSL": False
+        }
 
     response.encoding = response.apparent_encoding
 
@@ -34,6 +101,7 @@ def get_shop_info(gnavi_url):
     # =====================================
     # 店舗名
     # =====================================
+
     shop_name = ""
 
     for h1 in soup.find_all("h1"):
@@ -41,6 +109,7 @@ def get_shop_info(gnavi_url):
         text = h1.get_text(strip=True)
 
         if text and text != "ぐるなび":
+
             shop_name = text
             break
 
@@ -48,6 +117,7 @@ def get_shop_info(gnavi_url):
     # =====================================
     # 電話番号
     # =====================================
+
     tel_numbers = []
 
     for tag in soup.find_all(
@@ -81,25 +151,45 @@ def get_shop_info(gnavi_url):
     # =====================================
     # メールアドレス
     # =====================================
+
     email = ""
 
-    page_text = soup.get_text(
-        " ",
-        strip=True
-    )
+    # 「お店に直接メールする」の
+    # mailto: だけを取得する
+    # ページ本文中の別メールは取得しない
+    for link in soup.find_all(
+        "a",
+        href=True
+    ):
 
-    email_match = re.search(
-        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-        page_text
-    )
+        href = link.get(
+            "href",
+            ""
+        ).strip()
 
-    if email_match:
-        email = email_match.group()
+        link_text = link.get_text(
+            " ",
+            strip=True
+        )
+
+        if (
+            href.lower().startswith("mailto:")
+            and "お店に直接メールする" in link_text
+        ):
+
+            email = (
+                href[7:]
+                .split("?")[0]
+                .strip()
+            )
+
+            break
 
 
     # =====================================
     # 住所取得
     # =====================================
+
     address_text = ""
 
     for tag in soup.find_all(
@@ -124,6 +214,7 @@ def get_shop_info(gnavi_url):
     # =====================================
     # 住所整形
     # =====================================
+
     address_text = re.sub(
         r"〒?\d{3}-\d{4}\s*",
         "",
@@ -159,82 +250,73 @@ def get_shop_info(gnavi_url):
 
     if pref_match:
         prefecture = pref_match.group(1)
-
-
-    # 都道府県を除いた住所
-    remaining_address = address_text
-
-    if prefecture:
-
-        remaining_address = (
-            remaining_address[
-                len(prefecture):
-            ]
-        )
+        remaining_address = address_text[len(prefecture):]
+    else:
+        remaining_address = address_text
 
 
     # =====================================
-    # 市区町村
+    # 建物名
+    # =====================================
+    parts = remaining_address.split(" ", 1)
+
+    main_address = parts[0]
+    building = (
+        parts[1]
+        if len(parts) == 2
+        else ""
+    )
+
+
+    # =====================================
+    # 市区町村（町名まで）・番地
     # =====================================
     city = ""
-
-    city_match = re.match(
-        r"^("
-        r".+?市市"
-        r"|.+?市.+?区"
-        r"|.+?市"
-        r"|.+?区"
-        r"|.+?町"
-        r"|.+?村"
-        r")",
-        remaining_address
-    )
-
-    if city_match:
-        city = city_match.group(1)
-
-
-    # 市区町村を除いた住所
-    street_and_building = (
-        remaining_address
-    )
-
-    if city:
-
-        street_and_building = (
-            street_and_building[
-                len(city):
-            ]
-        )
-
-
-    # =====================================
-    # 番地・建物名
-    # =====================================
     street = ""
-    building = ""
 
-    address_match = re.match(
-        r"^(\S+?[\d０-９]+(?:[-－ー]\d+)*)(?:\s+(.+))?$",
-        street_and_building
+    # 例：
+    # 北海道旭川市2条通8-569-1
+    # → 旭川市 / 2条通8-569-1
+    special_match = re.match(
+        r"^(.+?市)(\d+条(?:通)?\d+(?:[-－ー]\d+)*)$",
+        main_address
     )
 
-    if address_match:
+    if special_match:
 
-        street = address_match.group(1)
-
-        if address_match.group(2):
-            building = address_match.group(2)
+        city = special_match.group(1)
+        street = special_match.group(2)
 
     else:
 
-        street = street_and_building
+        # 原則として番地の数字が始まる直前までを
+        # 「市区町村」欄に入れる
+        normal_match = re.match(
+            r"^(.+?)(\d+(?:[-－ー]\d+)*)$",
+            main_address
+        )
+
+        if normal_match:
+
+            city = normal_match.group(1)
+            street = normal_match.group(2)
+
+        else:
+
+            city = main_address
 
 
     # =====================================
     # オフィシャルURL
     # =====================================
+
     official_url = ""
+
+    # 「お店のホームページ」を優先し、
+    # 有効なURLがなければ
+    # 「オフィシャルページ」を使用する
+    homepage_url = ""
+    official_page_url = ""
 
     for link in soup.find_all(
         "a",
@@ -246,50 +328,180 @@ def get_shop_info(gnavi_url):
             strip=True
         )
 
+        href = link.get(
+            "href",
+            ""
+        ).strip()
+
+        # # や javascript: は
+        # 店舗URLとして扱わない
         if (
-            "オフィシャル" in text
-            or "ホームページ" in text
+            not href
+            or href == "#"
+            or href.lower().startswith("javascript:")
         ):
+            continue
 
-            official_url = link["href"]
-            break
+        if (
+            "お店のホームページ" in text
+            and not homepage_url
+        ):
+            homepage_url = href
+
+        elif (
+            "オフィシャル" in text
+            and not official_page_url
+        ):
+            official_page_url = href
+
+    if homepage_url:
+        official_url = homepage_url
+
+    elif official_page_url:
+        official_url = official_page_url
 
 
     # =====================================
-    # SSL判定
+    # URL確認・SSL判定
     # =====================================
+
     ssl = False
 
     if official_url:
 
+        # 接続確認に失敗した場合にも、
+        # ぐるなびから取得した元URLは保持する
+        original_official_url = official_url
+
         try:
 
+            # アクセス前に3秒待機
             time.sleep(3)
 
+            # requests はデフォルトで verify=True。
+            # HTTPS証明書を検証した状態で接続する
             official_response = requests.get(
-                official_url,
+                original_official_url,
                 headers=headers,
-                timeout=10
+                timeout=10,
+                allow_redirects=True
             )
 
-            # リダイレクト後のURL
-            official_url = (
+            final_url = (
                 official_response.url
+                or ""
+            ).strip()
+
+            # CAPTCHAや認証ページへの転送を
+            # 店舗URLとして保存しない
+            suspicious_words = (
+                "captcha",
+                "challenge",
+                "verify",
+                "verification"
             )
 
-            if official_url.startswith(
-                "https://"
-            ):
-                ssl = True
+            final_url_lower = (
+                final_url.lower()
+            )
 
-        except requests.RequestException:
+            suspicious_redirect = any(
+                word in final_url_lower
+                for word in suspicious_words
+            )
 
-            pass
+            if suspicious_redirect:
+
+                print(
+                    "URL確認:",
+                    original_official_url,
+                    "-> 不適切な転送先のため元URLを保持:",
+                    final_url
+                )
+
+                official_url = (
+                    original_official_url
+                )
+
+                ssl = False
+
+            else:
+
+                # 正常な転送先なら、
+                # 実際に表示された最終URLを保存する
+                official_url = final_url
+
+                # 最終URLがHTTPSで、
+                # 証明書検証付き接続が成功した場合のみTrue
+                if (
+                    final_url_lower.startswith(
+                        "https://"
+                    )
+                    and official_response.ok
+                ):
+
+                    ssl = True
+
+                else:
+
+                    ssl = False
+
+                    print(
+                        "SSL確認失敗:",
+                        original_official_url,
+                        "final_url=",
+                        final_url,
+                        "status=",
+                        official_response.status_code
+                    )
+
+        except requests.exceptions.SSLError as e:
+
+            official_url = (
+                original_official_url
+            )
+
+            ssl = False
+
+            print(
+                "SSL証明書エラー:",
+                original_official_url,
+                e
+            )
+
+        except requests.exceptions.Timeout as e:
+
+            official_url = (
+                original_official_url
+            )
+
+            ssl = False
+
+            print(
+                "接続タイムアウト:",
+                original_official_url,
+                e
+            )
+
+        except requests.RequestException as e:
+
+            official_url = (
+                original_official_url
+            )
+
+            ssl = False
+
+            print(
+                "URL接続エラー:",
+                original_official_url,
+                e
+            )
 
 
     # =====================================
     # 1店舗分を辞書で返す
     # =====================================
+
     return {
         "店舗名": shop_name,
         "電話番号": phone,
@@ -304,25 +516,29 @@ def get_shop_info(gnavi_url):
 
 
 # =========================================
-# 検索結果から50店舗のURLを取得
+# 有効な店舗を50件取得
 # =========================================
+
 shop_urls = []
+processed_urls = set()
+results = []
 
 page = 1
 
 
-while len(shop_urls) < 50:
+while len(results) < 50:
 
     if page == 1:
 
         search_url = (
-            "https://r.gnavi.co.jp/area/jp/rs/"
+            "https://r.gnavi.co.jp/"
+            "area/jp/rs/"
         )
 
     else:
 
         search_url = (
-            f"https://r.gnavi.co.jp/"
+            "https://r.gnavi.co.jp/"
             f"area/jp/rs/?p={page}"
         )
 
@@ -334,9 +550,12 @@ while len(shop_urls) < 50:
     )
 
 
-    # サーバー負荷軽減
-    time.sleep(3)
+    # =====================================
+    # 検索ページ取得
+    # =====================================
 
+    # アクセス前に3秒待機
+    time.sleep(3)
 
     try:
 
@@ -346,6 +565,8 @@ while len(shop_urls) < 50:
             timeout=10
         )
 
+        response.raise_for_status()
+
         response.encoding = (
             response.apparent_encoding
         )
@@ -354,10 +575,14 @@ while len(shop_urls) < 50:
 
         print(
             "検索ページ取得エラー:",
+            search_url,
             e
         )
 
-        break
+        # このページだけの失敗なら、
+        # 次の検索ページを試す
+        page += 1
+        continue
 
 
     print(
@@ -373,8 +598,11 @@ while len(shop_urls) < 50:
 
 
     # =====================================
-    # 店舗URL抽出
+    # このページの店舗URLを抽出
     # =====================================
+
+    page_shop_urls = []
+
     for link in soup.find_all(
         "a",
         href=True
@@ -388,79 +616,163 @@ while len(shop_urls) < 50:
             href
         ):
 
-            if href not in shop_urls:
+            if (
+                href not in processed_urls
+                and href not in page_shop_urls
+            ):
 
-                shop_urls.append(href)
-
-                print(
-                    len(shop_urls),
+                page_shop_urls.append(
                     href
                 )
 
 
-                if len(shop_urls) >= 50:
-                    break
+    print(
+        "このページの新規候補:",
+        len(page_shop_urls),
+        "件"
+    )
+
+
+    # 新しい候補がない場合は、
+    # 無限ループを防ぐため終了する
+    if not page_shop_urls:
+
+        print(
+            "新しい店舗URLが見つからないため"
+            "終了します。"
+        )
+
+        break
+
+
+    # =====================================
+    # 候補店舗の詳細情報を取得
+    # =====================================
+
+    for url in page_shop_urls:
+
+        if len(results) >= 50:
+            break
+
+        processed_urls.add(
+            url
+        )
+
+        shop_urls.append(
+            url
+        )
+
+
+        print()
+        print(
+            f"候補{len(processed_urls)}件目を取得中"
+        )
+
+        print(url)
+
+
+        try:
+
+            shop_data = get_shop_info(
+                url
+            )
+
+
+            # 空データを50件の穴埋めとして
+            # カウントしない
+            required_values = (
+                shop_data.get(
+                    "店舗名",
+                    ""
+                ).strip(),
+
+                shop_data.get(
+                    "都道府県",
+                    ""
+                ).strip(),
+
+                shop_data.get(
+                    "市区町村",
+                    ""
+                ).strip()
+            )
+
+
+            if not all(
+                required_values
+            ):
+
+                print(
+                    "有効店舗として数えません:",
+                    url
+                )
+
+                continue
+
+
+            results.append(
+                shop_data
+            )
+
+
+            print(
+                "取得成功:",
+                shop_data["店舗名"]
+            )
+
+            print(
+                "有効店舗数:",
+                len(results),
+                "/ 50"
+            )
+
+
+        except Exception as e:
+
+            print(
+                "店舗取得エラー:",
+                url,
+                e
+            )
+
+            # 失敗した店舗はresultsに追加せず、
+            # 次の候補店舗へ進む
+            continue
 
 
     page += 1
 
 
 # =========================================
-# URL取得結果
+# 取得結果
 # =========================================
+
 print()
+
 print(
-    "店舗URL取得完了:",
-    len(shop_urls),
-    "件"
+    "処理した候補URL数:",
+    len(processed_urls)
+)
+
+print(
+    "有効店舗取得数:",
+    len(results)
 )
 
 
-# =========================================
-# 50店舗の詳細情報を取得
-# =========================================
-results = []
+# 50件に達しなかった場合は、
+# 不完全な状態でDB保存しない
+if len(results) < 50:
 
-
-for i, url in enumerate(
-    shop_urls,
-    start=1
-):
-
-    print()
-    print(
-        f"{i}/{len(shop_urls)} 店舗目を取得中"
+    raise RuntimeError(
+        "有効な店舗を50件取得できませんでした。"
     )
-
-    print(url)
-
-
-    try:
-
-        shop_data = get_shop_info(url)
-
-        results.append(
-            shop_data
-        )
-
-        print(
-            "取得完了:",
-            shop_data["店舗名"]
-        )
-
-
-    except Exception as e:
-
-        print(
-            "エラー:",
-            url,
-            e
-        )
 
 
 # =========================================
 # DataFrame作成
 # =========================================
+
 columns = [
     "店舗名",
     "電話番号",
@@ -483,16 +795,21 @@ df = pd.DataFrame(
 # =========================================
 # CSV保存
 # =========================================
+
 df.to_csv(
     "1-1.csv",
     index=False,
     encoding="utf-8-sig"
 )
 
+print()
+print("1-1.csv を保存しました。")
+
 
 # =========================================
 # 最終表示
 # =========================================
+
 print()
 print("============================")
 print("処理完了")
@@ -507,10 +824,4 @@ print()
 
 print(
     df.head()
-)
-
-print()
-
-print(
-    "1-1.csv を保存しました。"
 )
