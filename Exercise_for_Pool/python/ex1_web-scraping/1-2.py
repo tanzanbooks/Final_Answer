@@ -245,7 +245,7 @@ def get_address_parts(soup):
 
     # 番地と建物名の間に空白がなくても、番地の数字とハイフンで区切る
     street_match = re.match(
-        r"\d+(?:[-－ー−]\d+)*",
+        r"(?:\d+条通)?\d+(?:[-－ー−]\d+)*",
         after_city
     )
 
@@ -510,9 +510,18 @@ def get_shop_details(driver, shop_page_url):
                 error_type = "転送先URL不適切"
                 reason = f"元URL: {original_shop_url}／転送先: {actual_url}／{invalid_reason}"
             else:
-                # 有効な転送先だけをURL欄へ採用する。
-                shop_url = actual_url
+                # 通信・証明書・CAPTCHAの確認が終わるまで元URLを保持する。
                 ssl, error_type, reason = check_ssl(actual_url)
+                if ssl or error_type == "HTTPへの転送":
+                    # 接続確認を通過した場合だけ、ブラウザのアドレスバーのURLを採用する。
+                    # HTTPへの転送は通信成功だが、SSLはFalseのままとする。
+                    shop_url = actual_url
+                else:
+                    # 証明書エラー、接続失敗、CAPTCHAなどでは元URLをログにも残す。
+                    shop_url = original_shop_url
+                    reason = (
+                        f"元URL: {original_shop_url}／転送先: {actual_url}／{reason}"
+                    )
         else:
             ssl = False
             error_type = "リンク遷移失敗"
