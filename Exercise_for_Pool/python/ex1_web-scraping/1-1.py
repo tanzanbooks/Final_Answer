@@ -423,9 +423,13 @@ def get_shop_details(shop_page_url):
 
     if shop_url:
 
+        # 検証に成功した転送先だけを成果物のURL欄へ反映する。
+        final_urls = []
         ssl, error_type, reason = check_ssl(
-            shop_url
+            shop_url, final_url_callback=final_urls.append
         )
+        if final_urls:
+            shop_url = final_urls[0]
 
     else:
 
@@ -455,7 +459,7 @@ def get_shop_details(shop_page_url):
 
 # ==================== 6. SSLを確認 ====================
 
-def check_ssl(url):
+def check_ssl(url, final_url_callback=None):
     """URLに接続し、証明書の検証と最終URLのHTTPSを確認する。"""
 
     # まずURL自体が有効か確認
@@ -533,6 +537,11 @@ def check_ssl(url):
                 "CAPTCHA",
                 "転送先がCAPTCHA画面"
             )
+
+        # 証明書・HTTP応答・転送先の検査を通った場合のみ保存する。
+        # 失敗時は呼び出し元の元URLをそのまま残す。
+        if final_url_callback is not None:
+            final_url_callback(response.url)
 
         # 最終的なURLがhttpsならTrue
         if response.url.lower().startswith(

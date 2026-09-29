@@ -1,2 +1,4 @@
 ﻿発生日時,ぐるなび店舗URL,店舗名,確認対象URL,エラーの種類,具体的なエラーメッセージ
-2026-09-29T05:45:28+09:00,https://r.gnavi.co.jp/h1mz24ja0000/,WAGYU YAKINIKU ‐SHOGUN‐Shibuya,https://r.gnavi.co.jp/h1mz24ja0000/,店舗URLなし,お店のURLなし
+2026-09-29T22:45:45+09:00,https://r.gnavi.co.jp/f389300/,博多中洲 遊食亭,http://www.yushokutei.com/,通信エラー,403 Client Error: Forbidden for url: http://www.yushokutei.com/
+2026-09-29T22:46:20+09:00,https://r.gnavi.co.jp/jgw7tevw0000/,,https://r.gnavi.co.jp/jgw7tevw0000/,店舗ページ取得失敗,店舗ページを取得できませんでした。詳細は画面の「ページ取得失敗」を確認してください。
+2026-09-29T22:47:59+09:00,https://r.gnavi.co.jp/h1mz24ja0000/,WAGYU YAKINIKU ‐SHOGUN‐Shibuya,https://r.gnavi.co.jp/h1mz24ja0000/,店舗URLなし,お店のURLなし
