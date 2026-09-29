@@ -1,0 +1,23 @@
+﻿項目,中間報告 1-1.py,9/30に提出1-1.py,変更内容・具体的なコード,分類
+基本構成,get_shop_info() と末尾の直列処理（16–516行）,用途ごとに関数化し main() から実行（62–927行）,get_soup / get_address_parts / get_shop_url / get_shop_details / check_ssl / get_next_page_url / main,変更
+使用ライブラリ,"requests, BeautifulSoup, pandas, re, time（1–5行）","同左に json, socket, datetime, urljoin, urlparse を追加（1–12行）",data-o解析、原因分類、日時記録、リンク解決に使用,追加
+開始地点,全国検索URLを直接指定（314–329行）,"START_URL = ""https://www.gnavi.co.jp/""（17行）、get_first_search_page()（598–653行）",トップページを取得し、全国検索ページへ移動,変更
+ユーザーエージェント,"headers = {""User-Agent"": ""Mozilla/5.0""}（8–10行）","HEADERS = {""User-Agent"": ""ExerciseForPoolScraper(Python requests; educational use)""}（31行）",識別文字列を変更,変更
+アクセス前の待機,"店舗・検索・外部サイトの取得前に各 time.sleep(3)（18, 264, 340行付近）","get_soup() と check_ssl() で time.sleep(REQUEST_INTERVAL)（76–101, 458–595行）",3秒待機という方針は共通、実装箇所を集約,共通＋変更
+ページ取得,requests.get() → response.apparent_encoding → BeautifulSoup（20–33行）,get_soup(): requests.get() → raise_for_status() → UTF-8指定 → BeautifulSoup（76–101行）,HTTPエラーを失敗として扱う処理を追加,変更
+検索結果の店舗リンク,正規表現で店舗URLを判定し重複を除く（380–410行）,"SHOP_PATTERN.fullmatch(href) と seen_shops で判定（33, 770–800行付近）",対象を /英数字/ で終わるURLに限定。旧版は末尾スラッシュ省略も許容,共通＋変更
+50件の基準,先に店舗URL50件を集め、詳細を順番に取得（314–457行）,SSL True の rows が50件になるまで次の候補を取得（718–856行付近）,while len(rows) < TARGET_COUNT; if details[-1] is True: rows.append(details),変更
+次ページ,"page += 1 で ?p=2, ?p=3 とURLを組み立てる（314–420行）","get_next_page_url() で「＞」のリンクを読み、既訪問ページも除外（656–715, 856–887行）",画像 alt・aria-label・表示文字を確認,変更
+店名,h1の中から「ぐるなび」以外を採用（38–51行）,最初の h1 を採用、空なら候補を失敗扱い（321–364行付近）,取得方法と失敗時の扱いを変更,変更
+電話番号,span/p/td/dd 内の番号を抽出・重複削除（56–88行）,ページ全体の文字列から PHONE_PATTERN.search()（365–386行付近）,最初の一致を採用,変更
+メールアドレス,本文全体からメール形式の文字列を検索（93–110行）,「お店に直接メールする」の mailto: を採用（392–423行付近）,店舗向けメールリンクを対象に限定,変更
+住所の取り出し,郵便番号と都道府県を含む td/dd を検索（115–142行）,「住所」というラベルの行の td を取得（104–154行付近）,住所欄を指定して取得,変更
+住所の分割,市・区・町・村を正規表現で分け、番地と建物名を抽出（145–244行）,都道府県を分け、数字の手前を市区町村欄、数字以降を番地・建物名へ（155–199行）,sample.csv の列に合わせる分割方式へ変更,変更
+店舗ホームページ,「オフィシャル」か「ホームページ」を含む最初の href（249–275行）,「お店のホームページ」を優先し、次に「オフィシャルページ」（278–318行）,優先順位を明示,変更
+data-o のリンク,href をそのまま使用（249–275行）,"decode_shop_link() で href=""#"" のとき data-o を解析（202–230行）",JSON内の a と b からURLを再構成,追加
+不適切なURL,個別の除外処理なし,invalid_shop_url_reason()（233–275行）,http(s)以外、ぐるなびの中継先、CAPTCHA関連URLを除外,追加
+SSL判定,外部URLに接続し、最終URLが https:// ならTrue。例外はFalse（280–303行）,check_ssl() で証明書検証・転送先・CAPTCHAを確認（458–595行）,証明書、HTTP転送、CAPTCHA、通信失敗を分ける,変更
+失敗理由,画面に一部表示。CSVへの詳細記録なし（445–457行）,make_error_row() で日時、店舗、確認URL、種類、メッセージを記録（52–71行）,SSL Falseや取得失敗を別CSVへ記録,追加
+提出用CSV,9列の 1-1.csv、utf-8-sig（464–491行）,"同じ9列の 1-1.csv、utf-8-sig（40–50, 891–905行付近）",列名・列数とファイル名は共通。新版はSSL Trueのみ保存,共通＋変更
+エラーCSV,なし,"1-1_ssl_errors.csv（21, 52–59, 907–917行付近）",提出用CSVとは別に作成,追加
+実行時の入口,ファイル末尾の処理が直接実行される（309行以降）,"if __name__ == ""__main__"": main()（926–927行）",他のファイルから読み込んでも main() は自動実行されない,追加

@@ -1,18 +1,15 @@
-"""ぐるなびの店舗情報を50件取得し、MySQLのex2.ex2_2に保存する。"""
+"""ぐるなびの店舗情報を50件集め、CSVに保存します。"""
 
 import json
-import os
 import re
 import socket                  #**追加：名前解決失敗の判定に使う**
 import time
 from datetime import datetime  #**追加：発生日時に使う**
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import Boolean, Column, MetaData, String, Table, create_engine, delete, func, select
-from sqlalchemy.engine import URL
 
 
 # ==================== 1. 設定 ====================
@@ -20,12 +17,8 @@ from sqlalchemy.engine import URL
 START_URL = "https://www.gnavi.co.jp/"  # トップページから開始
 SEARCH_RESULTS_URL = "https://r.gnavi.co.jp/area/jp/rs/"
 
-DB_NAME = "ex2"
-TABLE_NAME = "ex2_2"
-DB_HOST = os.getenv("DB_HOST", "ex2_mysql")  # Docker内。Windowsから直接実行するならlocalhost
-DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "root")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+OUTPUT_FILE = "1-1.csv" #課題提出用のファイル
+ERROR_FILE = "1-1_ssl_errors.csv" #取得・SSL確認で失敗したときの記録
 
 TARGET_COUNT = 50 #変更**50件ではなく、50店舗を取得**
 
@@ -414,7 +407,9 @@ def get_shop_details(shop_page_url):
             and href.startswith("mailto:")
         ):
 
-            email = href[len("mailto:"):]
+            email = href.removeprefix(
+                "mailto:"
+            )
 
             break
 
@@ -659,8 +654,7 @@ def get_first_search_page(start_url):
 # ==================== 8. 次の検索ページを探す ====================
 
 def get_next_page_url(soup, current_url):
-    """画面に表示される「次」のリンク先を探す。"""
-    current_page = int(parse_qs(urlparse(current_url).query).get("p", ["1"])[0])
+    """画面に表示される＞」のリンク先を探す。"""
 
     for link in soup.find_all(
         "a",
@@ -714,115 +708,233 @@ def get_next_page_url(soup, current_url):
             == "/area/jp/rs/"
         ):
 
-            page = parse_qs(parsed.query).get("p", ["1"])[0]
-            if page.isdigit() and int(page) > current_page:
-                return next_url
+            return next_url
 
     return ""
 
 
 # ==================== 9. メイン処理 ====================
 
-def save_to_mysql(rows):
-    """50件の取得が完了してから、Python経由でテーブルを更新する。"""
-    address = URL.create(
-        "mysql+pymysql", username=DB_USER, password=DB_PASSWORD,
-        host=DB_HOST, port=DB_PORT, database=DB_NAME,
-        query={"charset": "utf8mb4"}
-    )
-    engine = create_engine(address, pool_pre_ping=True)
-    metadata = MetaData()
-    shops = Table(
-        TABLE_NAME, metadata,
-        Column("店舗名", String(255)),
-        Column("電話番号", String(50)),
-        Column("メールアドレス", String(320)),
-        Column("都道府県", String(20)),
-        Column("市区町村", String(255)),
-        Column("番地", String(255)),
-        Column("建物名", String(255)),
-        Column("URL", String(2048)),
-        Column("SSL", Boolean),
-    )
-    frame = pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
-    # 失敗店舗や空欄URLを50件に数えない。
-    if len(frame) != TARGET_COUNT or frame["URL"].eq("").any():
-        raise ValueError("有効なURLを持つ50店舗が揃っていません")
-    try:
-        # 既存データの削除と50件の保存を一つの処理として実行する。
-        with engine.begin() as connection:
-            metadata.create_all(connection, tables=[shops])
-            connection.execute(delete(shops))
-            frame.to_sql(TABLE_NAME, connection, if_exists="append", index=False)
-            count = connection.scalar(select(func.count(shops.c.URL)))
-            if count != TARGET_COUNT:
-                raise ValueError(f"保存後のURL件数が{count}件です")
-        print(f"MySQL {DB_NAME}.{TABLE_NAME} に{count}店舗保存しました")
-    finally:
-        engine.dispose()
-
-
 def main():
-    search_url = get_first_search_page(START_URL)
+
+    # ===== メールアドレス取得テスト =====
+    test_url = "https://r.gnavi.co.jp/n814504/"
+
+    details, error_type, reason = get_shop_details(test_url)
+
+    if details:
+        print("店舗名:", details[0])
+        print("メールアドレス:", details[2])
+
+    return
+    # ===== テストここまで =====
+    
+
+    # ---------- 最初の検索ページ ----------
+
+    search_url = get_first_search_page(
+        START_URL
+    )
+
     if not search_url:
-        print("トップページを取得できなかったため終了します")
+
+        print(
+            "トップページを取得できなかったため"
+            "終了します。"
+        )
+
         return
 
+    # 同じ検索ページに戻らないための記録
     visited_pages = set()
+
+    # 同じ店舗を重複して取得しないための記録
     seen_shops = set()
+
+    # SSLがTrueの店舗だけを入れる
     rows = []
-    errors = []
 
+    # SSL Falseや取得失敗を記録する
+    error_rows = []
+
+    # SSL Trueが50店舗になるまで続ける
     while len(rows) < TARGET_COUNT:
-        if search_url in visited_pages:
-            print("訪問済みの検索ページです。終了します")
-            break
-        visited_pages.add(search_url)
-        print(f"検索ページ: {search_url}")
-        soup = get_soup(search_url)  # requests.getの直前に3秒待機
+
+        visited_pages.add(
+            search_url
+        )
+
+        print(
+            f"検索ページ: {search_url}"
+        )
+
+        # 検索結果ページを取得
+        # get_soup() 内で3秒待つ
+        soup = get_soup(
+            search_url
+        )
+
         if soup is None:
+
+            print(
+                "検索ページを取得できないため"
+                "中断します。"
+            )
+
             break
 
-        for link in soup.find_all("a", href=True):
-            shop_page_url = link["href"]
-            if not SHOP_PATTERN.fullmatch(shop_page_url):
+        # ---------- 店舗リンクを探す ----------
+
+        links = soup.find_all("a")
+
+        for link in links:
+
+            href = link.get(
+                "href",
+                ""
+            )
+
+            # 店舗ページのURLでなければ無視
+            if not SHOP_PATTERN.fullmatch(
+                href
+            ):
                 continue
-            if shop_page_url in seen_shops:
+
+            # すでに調べた店舗なら無視
+            if href in seen_shops:
                 continue
-            seen_shops.add(shop_page_url)
-            print(f"候補: {shop_page_url}")
-            details, error_type, reason = get_shop_details(shop_page_url)
+
+            seen_shops.add(
+                href
+            )
+
+            print(
+                f"候補: {href}"
+            )
+
+            # 1店舗の情報を取得
+            details, error_type, reason = (
+                get_shop_details(href)
+            )
+
+            # 店舗ページそのものの取得に失敗した場合
             if details is None:
-                errors.append(make_error_row(shop_page_url, "", shop_page_url, error_type, reason))
+
+                error_rows.append(make_error_row(
+                    href, "", href, error_type, reason
+                ))
+
                 continue
-            if details[-1] is True and details[-2]:
-                rows.append(details)
-                print(f"SSL True: {len(rows)}/{TARGET_COUNT}店舗")
+
+            # detailsの最後はSSLのTrue/False
+            if details[-1] is True:
+
+                rows.append(
+                    details
+                )
+
+                print(
+                    "SSL True: "
+                    f"{len(rows)}/"
+                    f"{TARGET_COUNT}店舗"
+                )
+
             else:
-                errors.append(make_error_row(
-                    shop_page_url, details[0], details[-2] or shop_page_url,
+
+                # 出力用CSVには入れず、エラー原因を別CSVに残す
+                error_rows.append(make_error_row(
+                    href, details[0], details[-2] or href,
                     error_type, reason
                 ))
-                print(f"  SSL False: {reason}（次の候補へ）")
-            if len(rows) >= TARGET_COUNT:
+
+                print(
+                    "  SSL False: "
+                    f"{reason}"
+                    "（次の候補へ）"
+                )
+
+            # SSL Trueが50店舗に達したら終了
+            if len(rows) == TARGET_COUNT:
                 break
 
-        if len(rows) >= TARGET_COUNT:
+        # 50店舗集まった場合
+        if len(rows) == TARGET_COUNT:
             break
-        next_url = get_next_page_url(soup, search_url)
-        if not next_url or next_url in visited_pages:
-            print("次の未訪問ページが見つかりません")
+
+        # ---------- 次の検索結果ページへ ----------
+
+        # 画面上の「＞」リンクを読み、そこに書かれたURLへ進む
+        next_url = get_next_page_url(
+            soup,
+            search_url
+        )
+
+        if not next_url:
+
+            print(
+                "次ページへの「＞」リンクがありません。"
+            )
+
             break
+
+        # すでに訪問したページなら停止
+        if next_url in visited_pages:
+
+            print(
+                "次ページのリンクが"
+                "訪問済みのページを指しています。"
+            )
+
+            break
+
         search_url = next_url
 
-    if len(rows) != TARGET_COUNT:
-        print(f"有効な店舗は{len(rows)}件です。50件未満なのでMySQLは更新しません")
-        return
-    save_to_mysql(rows)
-    print(f"取得失敗・SSL False: {len(errors)}件")
-    for error in errors:
-        print(f"  {error[3]} | {error[4]} | {error[5]}")
 
+    # ==================== 10. CSVに保存 ====================
+
+    # pandasのDataFrameで列順を指定する。
+    # 空文字は空欄のまま保存する。
+    pd.DataFrame(
+        rows,
+        columns=OUTPUT_COLUMNS
+    ).to_csv(
+        OUTPUT_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    # エラー情報は別CSVに保存
+    pd.DataFrame(
+        error_rows,
+        columns=ERROR_COLUMNS
+    ).to_csv(
+        ERROR_FILE,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    # ---------- 実行結果 ----------
+
+    print(
+        f"SSL Trueの{len(rows)}店舗を"
+        f"{OUTPUT_FILE}に保存しました。"
+    )
+
+    print(
+        f"失敗・SSL Falseの"
+        f"{len(error_rows)}件を"
+        f"{ERROR_FILE}に記録しました。"
+    )
+
+    if len(rows) < TARGET_COUNT:
+
+        print(
+            "50店舗に達していません。"
+            "取得条件やエラーを確認してください。"
+        )
+
+
+# ==================== 11. プログラム開始 ====================
 
 if __name__ == "__main__":
     main()

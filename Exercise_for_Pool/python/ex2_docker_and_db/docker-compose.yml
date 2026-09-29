@@ -7,6 +7,11 @@ services:
     stdin_open: true
     depends_on:
       - mysql
+    environment:
+      DB_HOST: ex2_mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
     volumes:
       - .:/app
 
