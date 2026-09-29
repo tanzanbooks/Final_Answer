@@ -1,160 +1,88 @@
 """
-公式 sample.csv の24件を使って、
-1-1.py の住所分割処理が正しいか確認するテストプログラム。
+sample.csv の住所24件を使い、
+1-1.py の get_address_parts() の分割結果を確認する。
 """
 
+from pathlib import Path
+import importlib.util
+from html import escape
+
 import pandas as pd
-
-# 1-1.pyと同じ住所分割関数を使用する
-from improved1_1 import split_address
+from bs4 import BeautifulSoup
 
 
-# ==================== 1. 設定 ====================
-
-SAMPLE_FILE = "sample.csv"
-
-
-# ==================== 2. sample.csvを読む ====================
-
-df = pd.read_csv(
-    SAMPLE_FILE,
-    encoding="utf-8-sig"
-)
+TEST_DIR = Path(__file__).resolve().parent
+SAMPLE_FILE = TEST_DIR / "sample.csv"
+PROGRAM_FILE = TEST_DIR.parent / "ex1_web-scraping" / "1-1.py"
 
 
-# ==================== 3. テスト開始 ====================
+# 1-1.pyを読み込む
+spec = importlib.util.spec_from_file_location("program_1_1", PROGRAM_FILE)
+
+if spec is None or spec.loader is None:
+    raise ImportError(f"読み込めません: {PROGRAM_FILE}")
+
+program = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(program)
+
+get_address_parts = program.get_address_parts
+
+
+def cell_value(row, column):
+    """CSVの空欄を空文字にして、前後の空白を除く。"""
+    value = row[column]
+    return "" if pd.isna(value) else str(value).strip()
+
+
+df = pd.read_csv(SAMPLE_FILE, encoding="utf-8-sig", dtype=str)
 
 success_count = 0
 
 print("===== 住所分割テスト =====")
 print()
 
-
 for index, row in df.iterrows():
+    prefecture = cell_value(row, "都道府県")
+    city = cell_value(row, "市区町村")
+    street = cell_value(row, "番地")
+    building = cell_value(row, "建物名")
 
-    # ---------- sample.csvの正解データ ----------
+    expected = (prefecture, city, street, building)
 
-    prefecture = (
-        ""
-        if pd.isna(row["都道府県"])
-        else str(row["都道府県"]).strip()
-    )
-
-    city = (
-        ""
-        if pd.isna(row["市区町村"])
-        else str(row["市区町村"]).strip()
-    )
-
-    street = (
-        ""
-        if pd.isna(row["番地"])
-        else str(row["番地"]).strip()
-    )
-
-    building = (
-        ""
-        if pd.isna(row["建物名"])
-        else str(row["建物名"]).strip()
-    )
-
-
-    # ---------- 正解データ ----------
-
-    expected = (
-        prefecture,
-        city,
-        street,
-        building
-    )
-
-
-    # ---------- 元の住所を復元 ----------
-
-    # 都道府県、市区町村、番地をつなげる
-    full_address = (
-        prefecture
-        + city
-        + street
-    )
-
-    # 建物名がある場合は、
-    # 番地との境界が分かるようにスペースを入れる
+    # sample.csvの列から、店舗ページの住所欄に相当するHTMLを作る
+    full_address = prefecture + city + street
     if building:
         full_address += " " + building
 
-
-    # ---------- 1-1.pyの住所分割関数を実行 ----------
-
-    actual = split_address(
-        full_address
+    html = (
+        "<table><tr><th>住所</th><td>"
+        + escape(full_address)
+        + "</td></tr></table>"
     )
+    soup = BeautifulSoup(html, "html.parser")
 
-
-    # ---------- 正解と比較 ----------
+    actual = get_address_parts(soup)
 
     if actual == expected:
-
         result = "OK"
         success_count += 1
-
     else:
-
         result = "NG"
 
+    print(f"{index + 1:2}件目: {result}")
 
-    # ---------- 1件ごとの結果を表示 ----------
-
-    print(
-        f"{index + 1:2}件目: {result}"
-    )
-
-
-    # NGの場合だけ詳細を表示する
     if result == "NG":
-
-        print(
-            f"   元住所 : {full_address}"
-        )
-
-        print(
-            f"   正解   : {expected}"
-        )
-
-        print(
-            f"   実際   : {actual}"
-        )
-
+        print(f"   元住所 : {full_address}")
+        print(f"   正解   : {expected}")
+        print(f"   実際   : {actual}")
         print()
-
-
-# ==================== 4. 最終結果 ====================
 
 print()
 print("----------------------------------------")
-
-print(
-    f"住所分割テスト結果: "
-    f"{success_count}/{len(df)} 一致"
-)
-
+print(f"住所分割テスト結果: {success_count}/{len(df)} 一致")
 print("----------------------------------------")
 
-
-# ==================== 5. 合否を表示 ====================
-
 if success_count == len(df):
-
-    print(
-        "すべての住所がsample.csvと一致しました。"
-    )
-
+    print("すべての住所がsample.csvと一致しました。")
 else:
-
-    failed_count = (
-        len(df) - success_count
-    )
-
-    print(
-        f"{failed_count}件の住所が一致しませんでした。"
-    )
+    print(f"{len(df) - success_count}件の住所が一致しませんでした。")

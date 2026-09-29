@@ -1,295 +1,192 @@
 """
-SSL確認の異常系テスト
+test_ssl_errors.py
 
-実際の1-1.pyの check_ssl() を使用して、
+提出用1-1.pyの check_ssl() を使用し、
+接続失敗とCAPTCHA画面を模擬する。
 
-1. 接続失敗
-2. CAPTCHA画面
-
-を人工的に発生させる。
-
-確認すること
-・元の店舗URLが失われない
-・SSL結果がFalseになる
-・原因が正しく判定される
-・エラーログに残せる情報が返される
+check_ssl() の判定結果から make_error_row() で
+ログ用の行を作り、URL・原因・メッセージを確認する。
 
 実際の外部サイトにはアクセスしない。
 """
 
+import importlib.util
+import sys
+from pathlib import Path
+from unittest.mock import Mock, patch
+
 import requests
-
-from unittest.mock import patch, Mock
-
-from improved1_1 import check_ssl
 
 
 # ============================================================
-# 共通設定
+# 1. 提出用1-1.pyを読み込む
+# ============================================================
+
+TEST_DIR = Path(__file__).resolve().parent
+PROGRAM_FILE = TEST_DIR.parent / "ex1_web-scraping" / "1-1.py"
+
+spec = importlib.util.spec_from_file_location(
+    "program_1_1",
+    PROGRAM_FILE
+)
+
+if spec is None or spec.loader is None:
+    raise ImportError(f"1-1.pyを読み込めません: {PROGRAM_FILE}")
+
+program = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = program
+spec.loader.exec_module(program)
+
+
+# ============================================================
+# 2. 結果を確認する関数
 # ============================================================
 
 success_count = 0
 test_count = 0
 
+# make_error_row() の列順：
+# 発生日時、ぐるなび店舗URL、店舗名、
+# 確認対象URL、エラーの種類、具体的なエラーメッセージ
+TARGET_URL_INDEX = 3
+ERROR_TYPE_INDEX = 4
+MESSAGE_INDEX = 5
+
+
+def check_result(
+    test_name,
+    original_url,
+    ssl_result,
+    error_type,
+    error_message,
+    expected_type,
+    expected_message
+):
+    global success_count, test_count
+
+    test_count += 1
+
+    log_row = program.make_error_row(
+        "https://r.gnavi.co.jp/test/",
+        "テスト店舗",
+        original_url,
+        error_type,
+        error_message
+    )
+
+    passed = (
+        ssl_result is False
+        and error_type == expected_type
+        and expected_message in error_message
+        and log_row[TARGET_URL_INDEX] == original_url
+        and log_row[ERROR_TYPE_INDEX] == expected_type
+        and expected_message in log_row[MESSAGE_INDEX]
+    )
+
+    print()
+    print("========================================")
+    print(test_name)
+    print("========================================")
+    print("元の外部サイトURL:", original_url)
+    print("SSL結果:", ssl_result)
+    print("エラー種類:", error_type)
+    print("エラーメッセージ:", error_message)
+    print("ログ行の確認対象URL:", log_row[TARGET_URL_INDEX])
+    print("ログ行のエラー種類:", log_row[ERROR_TYPE_INDEX])
+    print("ログ行のメッセージ:", log_row[MESSAGE_INDEX])
+    print("結果:", "OK" if passed else "NG")
+
+    if passed:
+        success_count += 1
+
 
 # ============================================================
-# テスト1
-# 接続失敗を人工的に発生させる
+# 3. 接続失敗
 # ============================================================
-
-print()
-print("========================================")
-print("テスト1: 接続失敗")
-print("========================================")
-
 
 original_url_1 = "https://shop.example.com/"
 
-
-# requests.get() が呼ばれたら、
-# ConnectionErrorを発生させる
-with patch(
-    "improved1_1.requests.get"
-) as mock_get:
-
-    mock_get.side_effect = (
-        requests.exceptions.ConnectionError(
-            "テスト用の接続失敗"
-        )
-    )
-
-    ssl_result_1, error_type_1, error_message_1 = (
-        check_ssl(original_url_1)
-    )
-
-
-# check_ssl()を実行した後も、
-# 元URLそのものは変更していない
-saved_url_1 = original_url_1
-
-
-print(
-    "元のURL:",
-    original_url_1
-)
-
-print(
-    "保存するURL:",
-    saved_url_1
-)
-
-print(
-    "SSL結果:",
-    ssl_result_1
-)
-
-print(
-    "エラー種類:",
-    error_type_1
-)
-
-print(
-    "エラーメッセージ:",
-    error_message_1
-)
-
-
-test_count += 1
-
-
-if (
-    saved_url_1 == original_url_1
-    and ssl_result_1 is False
-    and error_type_1 == "接続エラー"
-    and "テスト用の接続失敗"
-    in error_message_1
+with (
+    patch.object(program.time, "sleep"),
+    patch.object(program.requests, "get") as mock_get
 ):
+    mock_get.side_effect = requests.exceptions.ConnectionError(
+        "テスト用の接続失敗"
+    )
 
-    print("結果: OK")
-    success_count += 1
+    (
+        ssl_result_1,
+        error_type_1,
+        error_message_1
+    ) = program.check_ssl(original_url_1)
 
-else:
-
-    print("結果: NG")
-
-
-# ============================================================
-# テスト2
-# CAPTCHA画面を人工的に返す
-# ============================================================
-
-print()
-print("========================================")
-print("テスト2: CAPTCHA")
-print("========================================")
-
-
-original_url_2 = "https://shop.example.com/"
-
-
-# requests.get() が返す偽のレスポンスを作る
-mock_response = Mock()
-
-mock_response.url = (
-    original_url_2
+check_result(
+    "テスト1: 接続失敗",
+    original_url_1,
+    ssl_result_1,
+    error_type_1,
+    error_message_1,
+    "接続エラー",
+    "テスト用の接続失敗"
 )
 
+
+# ============================================================
+# 4. CAPTCHA画面
+# ============================================================
+
+original_url_2 = "https://shop2.example.com/"
+
+mock_response = Mock()
+mock_response.url = original_url_2
 mock_response.text = """
 <html>
-<head>
-    <title>CAPTCHA</title>
-</head>
-
-<body>
-    ロボットではないことを確認してください
-</body>
+<head><title>CAPTCHA</title></head>
+<body>ロボットではないことを確認してください</body>
 </html>
 """
-
-
-# raise_for_status()では
-# エラーを発生させない
 mock_response.raise_for_status.return_value = None
 
-
-with patch(
-    "improved1_1.requests.get",
-    return_value=mock_response
-):
-
-    ssl_result_2, error_type_2, error_message_2 = (
-        check_ssl(original_url_2)
+with (
+    patch.object(program.time, "sleep"),
+    patch.object(
+        program.requests,
+        "get",
+        return_value=mock_response
     )
-
-
-# CAPTCHAになっても
-# 元の外部サイトURLを保持する
-saved_url_2 = original_url_2
-
-
-print(
-    "元のURL:",
-    original_url_2
-)
-
-print(
-    "保存するURL:",
-    saved_url_2
-)
-
-print(
-    "SSL結果:",
-    ssl_result_2
-)
-
-print(
-    "エラー種類:",
-    error_type_2
-)
-
-print(
-    "エラーメッセージ:",
-    error_message_2
-)
-
-
-test_count += 1
-
-
-if (
-    saved_url_2 == original_url_2
-    and ssl_result_2 is False
-    and error_type_2 == "CAPTCHA"
-    and "CAPTCHA"
-    in error_message_2
 ):
+    (
+        ssl_result_2,
+        error_type_2,
+        error_message_2
+    ) = program.check_ssl(original_url_2)
 
-    print("結果: OK")
-    success_count += 1
-
-else:
-
-    print("結果: NG")
-
-
-# ============================================================
-# エラーログに保存する内容を確認
-# ============================================================
-
-print()
-print("========================================")
-print("ログへ保存できる情報")
-print("========================================")
-
-print()
-
-print("【接続失敗】")
-
-print(
-    "URL:",
-    saved_url_1
-)
-
-print(
-    "エラー種類:",
-    error_type_1
-)
-
-print(
-    "エラーメッセージ:",
-    error_message_1
-)
-
-
-print()
-
-print("【CAPTCHA】")
-
-print(
-    "URL:",
-    saved_url_2
-)
-
-print(
-    "エラー種類:",
-    error_type_2
-)
-
-print(
-    "エラーメッセージ:",
-    error_message_2
+check_result(
+    "テスト2: CAPTCHA画面",
+    original_url_2,
+    ssl_result_2,
+    error_type_2,
+    error_message_2,
+    "CAPTCHA",
+    "CAPTCHA"
 )
 
 
 # ============================================================
-# 最終結果
+# 5. 最終結果
 # ============================================================
 
 print()
 print("========================================")
 print("SSL異常系テスト結果")
 print("========================================")
-
-print(
-    f"{success_count}/{test_count} テスト成功"
-)
-
+print(f"{success_count}/{test_count} テスト成功")
 
 if success_count == test_count:
-
+    print("すべてのテストに成功しました。")
     print(
-        "すべてのテストに成功しました。"
+        "接続失敗・CAPTCHAの場合に、SSLをFalseとし、"
+        "元URLと原因を含むログ用の行を作れることを確認しました。"
     )
-
-    print(
-        "接続失敗・CAPTCHAの場合でも、"
-        "元の外部サイトURLを保持し、"
-        "原因を記録できることを確認しました。"
-    )
-
 else:
-
-    print(
-        f"{test_count - success_count}件の"
-        "テストに失敗しました。"
-    )
+    print(f"{test_count - success_count}件のテストに失敗しました。")

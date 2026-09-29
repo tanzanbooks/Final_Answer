@@ -1,545 +1,206 @@
 """
 test_real_next_button.py
 
-【目的】
-ぐるなびの実サイトで、
+提出用 1-2.py の関数を使い、実サイトで
+「次」ボタンをクリックして次ページへ進めるか確認する。
 
-・ページ番号「2」ではなく
-・ページ下部の「>」ボタン
-
-をSeleniumが選択してクリックしていることを確認する。
-
-※提出用プログラムは変更しない。
+クリック前に対象を黄色の背景と赤枠で強調し、
+5秒間、目視で確認できるようにする。
 """
 
+import importlib.util
+import sys
 import time
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import (
-    TimeoutException,
-    WebDriverException
-)
 
 
 # ============================================================
-# 設定
+# 1. 提出用1-2.pyを読み込む
+# ============================================================
+
+TEST_DIR = Path(__file__).resolve().parent
+PROGRAM_FILE = TEST_DIR.parent / "ex1_web-scraping" / "1-2.py"
+
+spec = importlib.util.spec_from_file_location(
+    "program_1_2",
+    PROGRAM_FILE
+)
+
+if spec is None or spec.loader is None:
+    raise ImportError(f"1-2.pyを読み込めません: {PROGRAM_FILE}")
+
+program = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = program
+spec.loader.exec_module(program)
+
+
+# ============================================================
+# 2. 設定
 # ============================================================
 
 START_URL = "https://r.gnavi.co.jp/area/jp/rs/"
 
-# 課題指定のクリック前待機時間
-REQUEST_INTERVAL = 3
 
+def find_next_button(driver, next_url):
+    """
+    提出用 click_next_page() と同じ条件で、
+    クリック対象になる「次」ボタンを探す。
+    """
 
-# ============================================================
-# Chromeを起動
-# ============================================================
+    for element in driver.find_elements(By.TAG_NAME, "a"):
+        href = element.get_attribute("href")
 
-driver = webdriver.Chrome()
-
-
-try:
-
-    print()
-    print("========================================")
-    print("実サイト「>」ボタンクリックテスト")
-    print("========================================")
-
-    # ========================================================
-    # 1. ぐるなび検索結果の1ページ目を開く
-    # ========================================================
-
-    print()
-    print("1ページ目を開きます。")
-    print(START_URL)
-
-    driver.get(START_URL)
-
-    # ページの読み込み完了を待つ
-    WebDriverWait(
-        driver,
-        30
-    ).until(
-        lambda browser:
-            browser.execute_script(
-                "return document.readyState"
-            ) == "complete"
-    )
-
-    print()
-    print("1ページ目の読み込み完了")
-
-
-    # ========================================================
-    # 2. ページ内のすべてのリンクを取得
-    # ========================================================
-
-    links = driver.find_elements(
-        By.TAG_NAME,
-        "a"
-    )
-
-    print(
-        f"ページ内のリンク数: {len(links)}"
-    )
-
-
-    # ========================================================
-    # 3. 「次」を表す「>」ボタンを探す
-    # ========================================================
-
-    next_button = None
-
-    next_text = ""
-    next_label = ""
-    next_image_alt = ""
-    next_href = ""
-
-
-    for element in links:
-
-        try:
-
-            # --------------------------------------------
-            # リンクのURL
-            # --------------------------------------------
-
-            href = (
-                element.get_attribute("href")
-                or ""
-            )
-
-
-            # --------------------------------------------
-            # aria-label
-            # --------------------------------------------
-
-            label = (
-                element.get_attribute(
-                    "aria-label"
-                )
-                or ""
-            )
-
-
-            # --------------------------------------------
-            # 画面に表示されている文字
-            # --------------------------------------------
-
-            text = (
-                element.text.strip()
-            )
-
-
-            # --------------------------------------------
-            # リンク内の画像を調べる
-            # --------------------------------------------
-
-            images = element.find_elements(
-                By.TAG_NAME,
-                "img"
-            )
-
-
-            if images:
-
-                image_alt = (
-                    images[0].get_attribute(
-                        "alt"
-                    )
-                    or ""
-                )
-
-            else:
-
-                image_alt = ""
-
-
-            # --------------------------------------------
-            # 「次」を表すボタンか判定
-            #
-            # ページ番号「2」だけのリンクは
-            # この条件には該当しない
-            # --------------------------------------------
-
-            is_next_button = (
-                label.startswith("次")
-                or image_alt.startswith("次")
-                or text in (
-                    ">",
-                    "＞",
-                    "次へ"
-                )
-            )
-
-
-            if is_next_button:
-
-                next_button = element
-
-                next_text = text
-                next_label = label
-                next_image_alt = image_alt
-                next_href = href
-
-                break
-
-
-        except WebDriverException:
-
+        if href != next_url:
             continue
 
+        label = element.get_attribute("aria-label") or ""
+        images = element.find_elements(By.TAG_NAME, "img")
 
-    # ========================================================
-    # 4. 「>」ボタンが見つからなかった場合
-    # ========================================================
-
-    if next_button is None:
-
-        print()
-        print("========================================")
-        print("テスト結果")
-        print("========================================")
-
-        print(
-            "NG: 「>」ボタンが"
-            "見つかりませんでした。"
+        image_alt = (
+            images[0].get_attribute("alt") or ""
+            if images else ""
         )
 
+        visible_text = element.text.strip()
 
-    # ========================================================
-    # 5. 「>」ボタンが見つかった場合
-    # ========================================================
-
-    else:
-
-        print()
-        print("========================================")
-        print("クリック対象を発見")
-        print("========================================")
-
-        print(
-            "表示文字:",
-            repr(next_text)
+        is_next_button = (
+            label.startswith("次")
+            or image_alt.startswith("次")
+            or visible_text in (">", "＞", "次へ")
         )
 
-        print(
-            "aria-label:",
-            repr(next_label)
-        )
+        if is_next_button:
+            return element, visible_text, label, image_alt
 
-        print(
-            "画像alt:",
-            repr(next_image_alt)
-        )
-
-        print(
-            "リンク先URL:",
-            next_href
-        )
-
-
-        # ====================================================
-        # 6. ページ番号「2」でないことを確認
-        # ====================================================
-
-        print()
-        print("----------------------------------------")
-        print("確認1: ページ番号「2」ではないか")
-        print("----------------------------------------")
-
-
-        if next_text == "2":
-
-            print(
-                "NG: ページ番号「2」を"
-                "選択しています。"
-            )
-
-            raise RuntimeError(
-                "ページ番号2を選択したため"
-                "テストを中止します。"
-            )
-
-        else:
-
-            print(
-                "OK: ページ番号「2」ではありません。"
-            )
-
-
-        # ====================================================
-        # 7. 「次」を示す要素であることを確認
-        # ====================================================
-
-        print()
-        print("----------------------------------------")
-        print("確認2: 「次」を表す要素か")
-        print("----------------------------------------")
-
-
-        if (
-            next_label.startswith("次")
-            or next_image_alt.startswith("次")
-            or next_text in (
-                ">",
-                "＞",
-                "次へ"
-            )
-        ):
-
-            print(
-                "OK: 「次」を表す要素です。"
-            )
-
-        else:
-
-            print(
-                "NG: 「次」を表す要素ではありません。"
-            )
-
-            raise RuntimeError(
-                "次ボタンではないため"
-                "テストを中止します。"
-            )
-
-
-        # ====================================================
-        # 8. クリック対象までスクロール
-        # ====================================================
-
-        driver.execute_script(
-            """
-            arguments[0].scrollIntoView({
-                block: 'center',
-                inline: 'center'
-            });
-            """,
-            next_button
-        )
-
-
-        # ====================================================
-        # 9. クリック対象を赤枠で囲む
-        # ====================================================
-
-        driver.execute_script(
-            """
-            arguments[0].style.border =
-                '5px solid red';
-
-            arguments[0].style.backgroundColor =
-                'yellow';
-            """,
-            next_button
-        )
-
-
-        print()
-        print("========================================")
-        print("画面を確認してください")
-        print("========================================")
-
-        print()
-        print(
-            "Chrome画面の赤枠＋黄色で"
-            "強調された部分が"
-            "これからクリックする要素です。"
-        )
-
-        print()
-        print(
-            "5秒間停止します。"
-        )
-
-
-        # ====================================================
-        # 10. 目視確認のため5秒停止
-        # ====================================================
-
-        time.sleep(5)
-
-
-        # ====================================================
-        # 11. クリック前のURLを記録
-        # ====================================================
-
-        before_url = (
-            driver.current_url
-        )
-
-        print()
-        print(
-            "クリック前URL:",
-            before_url
-        )
-
-        print(
-            "クリック対象URL:",
-            next_href
-        )
-
-
-        # ====================================================
-        # 12. 課題指定の3秒待機
-        # ====================================================
-
-        print()
-        print(
-            "クリック前に3秒待機します..."
-        )
-
-        time.sleep(
-            REQUEST_INTERVAL
-        )
-
-
-        # ====================================================
-        # 13. 実際に「>」をクリック
-        # ====================================================
-
-        print()
-        print(
-            "今から赤枠の「>」を"
-            "クリックします。"
-        )
-
-
-        next_button.click()
-
-
-        # ====================================================
-        # 14. ページが変わるまで待つ
-        # ====================================================
-
-        try:
-
-            WebDriverWait(
-                driver,
-                30
-            ).until(
-                lambda browser:
-                    browser.current_url
-                    != before_url
-            )
-
-            page_changed = True
-
-
-        except TimeoutException:
-
-            page_changed = False
-
-
-        # ====================================================
-        # 15. クリック後のURLを取得
-        # ====================================================
-
-        after_url = (
-            driver.current_url
-        )
-
-        print()
-        print(
-            "クリック後URL:",
-            after_url
-        )
-
-
-        # ====================================================
-        # 16. 最終判定
-        # ====================================================
-
-        print()
-        print("========================================")
-        print("最終結果")
-        print("========================================")
-
-
-        if page_changed:
-
-            print(
-                "OK: 実サイトで"
-                "次ページへ遷移しました。"
-            )
-
-            print()
-
-            print(
-                "ページ番号「2」ではなく、"
-            )
-
-            print(
-                "「次」を表す「>」ボタンを"
-            )
-
-            print(
-                "Seleniumでクリックしたことを"
-                "確認しました。"
-            )
-
-            print()
-
-            print(
-                "実サイトテスト成功"
-            )
-
-
-        else:
-
-            print(
-                "NG: 次ページへの"
-                "遷移を確認できませんでした。"
-            )
-
-
-        # ====================================================
-        # 17. クリック後の画面を5秒表示
-        # ====================================================
-
-        print()
-        print(
-            "クリック後の画面を"
-            "5秒間表示します。"
-        )
-
-        time.sleep(5)
+    return None, "", "", ""
 
 
 # ============================================================
-# エラー処理
+# 3. 実サイトで確認
 # ============================================================
 
-except Exception as error:
+driver = None
+
+try:
+    driver = webdriver.Chrome()
+    driver.set_page_load_timeout(30)
+
+    print("===== 実サイト「次」ボタンクリックテスト =====")
+    print("最初のページ:", START_URL)
+
+    # 提出用1-2.pyの関数で1ページ目を取得。
+    # この関数内でアクセス前に3秒待機する。
+    first_soup = program.get_soup(driver, START_URL)
+
+    if first_soup is None:
+        raise RuntimeError("1ページ目を取得できませんでした。")
+
+    before_url = driver.current_url
+    print("クリック前URL:", before_url)
+
+    # 提出用1-2.pyの関数で「次」のリンク先を取得
+    next_url = program.get_next_page_url(
+        first_soup,
+        before_url
+    )
+
+    if not next_url:
+        raise RuntimeError("次ページのリンク先を取得できませんでした。")
+
+    print("「次」ボタンのリンク先:", next_url)
+
+    # 提出用のクリック関数と同じ条件で、目視用の対象を探す
+    (
+        target,
+        visible_text,
+        label,
+        image_alt
+    ) = find_next_button(driver, next_url)
+
+    if target is None:
+        raise RuntimeError(
+            "画面上に「次」ボタンのクリック対象が見つかりません。"
+        )
 
     print()
-    print("========================================")
-    print("テスト中にエラーが発生しました")
-    print("========================================")
+    print("===== クリック対象 =====")
+    print("表示文字:", repr(visible_text))
+    print("aria-label:", repr(label))
+    print("画像alt:", repr(image_alt))
+    print("リンク先:", target.get_attribute("href"))
 
-    print(
-        type(error).__name__
+    if visible_text == "2":
+        raise RuntimeError(
+            "ページ番号「2」を選択したため中止します。"
+        )
+
+    # 画面中央に移動して、黄色の背景と赤枠で強調
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center'});",
+        target
     )
 
-    print(
-        str(error)
+    driver.execute_script(
+        "arguments[0].style.border = '5px solid red';"
+        "arguments[0].style.backgroundColor = 'yellow';",
+        target
     )
 
     print()
-    print(
-        "確認のため5秒間"
-        "Chromeを表示します。"
-    )
-
+    print("黄色の背景と赤枠で強調した対象を5秒間表示します。")
     time.sleep(5)
 
+    # 提出用1-2.pyの関数でクリック。
+    # 関数内でクリック直前に3秒待機する。
+    next_soup = program.click_next_page(driver, next_url)
 
-# ============================================================
-# Chrome終了
-# ============================================================
+    if next_soup is None:
+        raise RuntimeError(
+            "提出用関数による「次」ボタンのクリックに失敗しました。"
+        )
+
+    WebDriverWait(driver, 30).until(
+        lambda browser: (
+            browser.current_url == next_url
+            and browser.execute_script(
+                "return document.readyState"
+            ) == "complete"
+        )
+    )
+
+    after_url = driver.current_url
+    print()
+    print("クリック後URL:", after_url)
+
+    if after_url == next_url and next_soup.find("html"):
+        print("テスト結果: OK")
+        print(
+            "提出用1-2.pyの関数で「次」ボタンをクリックし、"
+            "次ページのURLとHTMLを確認しました。"
+        )
+    else:
+        print("テスト結果: NG")
+        print(
+            "次ページのURLまたはHTMLを確認できませんでした。"
+        )
+
+    print("クリック後の画面を5秒間表示します。")
+    time.sleep(5)
+
+except Exception as error:
+    print()
+    print("テスト結果: NG")
+    print("エラー種類:", type(error).__name__)
+    print("エラー内容:", error)
+
+    if driver is not None:
+        print("確認のため画面を5秒間表示します。")
+        time.sleep(5)
 
 finally:
-
-    driver.quit()
+    if driver is not None:
+        driver.quit()

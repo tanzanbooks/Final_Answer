@@ -1,48 +1,53 @@
 """
 test_selenium_wait_before_click.py
 
-【7. Seleniumのクリック前にも3秒待機する】
+提出用1-2.pyの click_shop_homepage() について確認する。
 
-確認内容
-1. REQUEST_INTERVAL が3秒である
-2. click()より前に sleep(3) が実行される
-3. 待機後にアクセス直前時間が記録される
-4. その後に click() が実行される
+1. REQUEST_INTERVAL が3秒
+2. click()の前に sleep(3) を実行
+3. 待機後、アクセス直前時間を記録
+4. その後に click() を実行
 
-提出用 improved1_2.py は変更しない。
+通信と待機は模擬する。提出用1-2.pyは変更しない。
 """
 
+import importlib.util
+import sys
+from pathlib import Path
 from unittest.mock import Mock, patch
-
-import improved1_2
 
 
 # ============================================================
-# 実行順序を記録する
+# 1. 提出用1-2.pyを読み込む
+# ============================================================
+
+TEST_DIR = Path(__file__).resolve().parent
+PROGRAM_FILE = TEST_DIR.parent / "ex1_web-scraping" / "1-2.py"
+
+spec = importlib.util.spec_from_file_location(
+    "program_1_2",
+    PROGRAM_FILE
+)
+
+if spec is None or spec.loader is None:
+    raise ImportError(f"1-2.pyを読み込めません: {PROGRAM_FILE}")
+
+program = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = program
+spec.loader.exec_module(program)
+
+
+# ============================================================
+# 2. 実行順序を記録する代用品
 # ============================================================
 
 events = []
 
 
-# ============================================================
-# sleep() の代用品
-# 実際には待たず、何秒待つ指定なのかを記録する
-# ============================================================
-
 def fake_sleep(seconds):
+    events.append(("sleep", seconds))
+    print(f"sleep({seconds})")
 
-    events.append(
-        ("sleep", seconds)
-    )
-
-    print(
-        f"sleep({seconds})"
-    )
-
-
-# ============================================================
-# record_preaccess_time() の代用品
-# ============================================================
 
 def fake_record_preaccess_time(
     shop_url,
@@ -50,513 +55,175 @@ def fake_record_preaccess_time(
     retrieved_at,
     method
 ):
+    events.append(("record_preaccess_time", method))
+    print(f"record_preaccess_time({method})")
 
-    events.append(
-        ("record_preaccess_time", method)
-    )
-
-    print(
-        "record_preaccess_time()"
-    )
-
-
-# ============================================================
-# click() の代用品
-# ============================================================
 
 def fake_click():
-
-    events.append(
-        ("click", None)
-    )
-
-    print(
-        "element.click()"
-    )
+    events.append(("click", None))
+    driver.current_url = TARGET_URL
+    print("element.click()")
 
 
 # ============================================================
-# テスト用URL
+# 3. 偽のリンクとWebDriver
 # ============================================================
 
-SHOP_PAGE_URL = (
-    "https://r.gnavi.co.jp/test/"
-)
-
-TARGET_URL = (
-    "https://shop.example.com/"
-)
-
-
-# ============================================================
-# テスト用の<a>要素
-# ============================================================
+SHOP_PAGE_URL = "https://r.gnavi.co.jp/test/"
+TARGET_URL = "https://shop.example.com/"
 
 element = Mock()
-
 element.is_displayed.return_value = True
 element.is_enabled.return_value = True
 
-element.get_attribute.side_effect = (
-    lambda name: {
-        "outerHTML":
-            '<a href="https://shop.example.com/">'
-            'お店のホームページ'
-            '</a>',
-        "href":
-            TARGET_URL
-    }.get(name, "")
-)
+element.get_attribute.side_effect = lambda name: {
+    "outerHTML": (
+        '<a href="https://shop.example.com/">'
+        "お店のホームページ"
+        "</a>"
+    ),
+    "href": TARGET_URL
+}.get(name, "")
 
-element.click.side_effect = (
-    fake_click
-)
-
-
-# ============================================================
-# テスト用WebDriver
-# ============================================================
+element.click.side_effect = fake_click
 
 driver = Mock()
-
 driver.current_window_handle = "main"
-
-driver.window_handles = [
-    "main"
-]
-
-driver.current_url = (
-    SHOP_PAGE_URL
-)
-
-driver.find_elements.return_value = [
-    element
-]
-
-driver.execute_script.return_value = (
-    "complete"
-)
+driver.window_handles = ["main"]
+driver.current_url = SHOP_PAGE_URL
+driver.find_elements.return_value = [element]
+driver.execute_script.return_value = "complete"
 
 
 # ============================================================
-# decode_shop_link() の代用品
-#
-# HTML解析そのものではなく、
-# 今回はクリック前待機だけをテストする。
-# ============================================================
-
-def fake_decode_shop_link(html):
-
-    return TARGET_URL
-
-
-# ============================================================
-# テスト開始
+# 4. 提出用関数を実行
 # ============================================================
 
 print()
-print(
-    "========================================"
-)
-print(
-    "Selenium クリック前3秒待機テスト"
-)
-print(
-    "========================================"
-)
-
-
-# ============================================================
-# REQUEST_INTERVAL の確認
-# ============================================================
-
-print()
-print(
-    "REQUEST_INTERVAL:",
-    improved1_2.REQUEST_INTERVAL
-)
-
-
-# ============================================================
-# 本番関数を実行
-# ============================================================
+print("========================================")
+print("Selenium クリック前3秒待機テスト")
+print("========================================")
+print("REQUEST_INTERVAL:", program.REQUEST_INTERVAL)
 
 try:
-
-    with patch(
-        "improved1_2.time.sleep",
-        side_effect=fake_sleep
-    ):
-
-        with patch(
-            "improved1_2.record_preaccess_time",
+    with (
+        patch.object(
+            program.time,
+            "sleep",
+            side_effect=fake_sleep
+        ),
+        patch.object(
+            program,
+            "record_preaccess_time",
             side_effect=fake_record_preaccess_time
-        ):
-
-            with patch(
-                "improved1_2.decode_shop_link",
-                side_effect=fake_decode_shop_link
-            ):
-
-                with patch(
-                    "improved1_2.WebDriverWait"
-                ) as mock_wait:
-
-                    wait_instance = Mock()
-
-                    mock_wait.return_value = (
-                        wait_instance
-                    )
-
-                    wait_instance.until.return_value = (
-                        True
-                    )
-
-                    # ----------------------------------------
-                    # 店舗ページを取得した時刻の代用品
-                    #
-                    # 今回は時間そのものではなく、
-                    # sleep → record → click の順序を確認する
-                    # ----------------------------------------
-
-                    shop_retrieved_at = 100.0
-
-                    result = (
-                        improved1_2.click_shop_homepage(
-                            driver,
-                            TARGET_URL,
-                            shop_retrieved_at
-                        )
-                    )
-
-
-    # ========================================================
-    # 実行順序を表示
-    # ========================================================
-
-    print()
-    print(
-        "========================================"
-    )
-    print(
-        "実行された処理の順番"
-    )
-    print(
-        "========================================"
-    )
-
-    for number, event in enumerate(
-        events,
-        start=1
+        ),
+        patch.object(program, "WebDriverWait") as mock_wait
     ):
-
-        print(
-            f"{number}: {event}"
+        # 待機条件を偽のdriverに対して評価する
+        wait_instance = mock_wait.return_value
+        wait_instance.until.side_effect = (
+            lambda condition: condition(driver)
         )
 
-
-    # ========================================================
-    # テスト1
-    # REQUEST_INTERVAL == 3
-    # ========================================================
+        result = program.click_shop_homepage(
+            driver,
+            TARGET_URL,
+            shop_retrieved_at=100.0
+        )
 
     print()
-    print(
-        "----------------------------------------"
+    print("========================================")
+    print("実行された処理の順番")
+    print("========================================")
+
+    for number, event in enumerate(events, start=1):
+        print(f"{number}: {event}")
+
+    # click()より前の記録だけを調べる
+    click_index = next(
+        (
+            index
+            for index, event in enumerate(events)
+            if event[0] == "click"
+        ),
+        None
     )
-    print(
-        "テスト1: 待機時間の設定"
+
+    sleep_index = next(
+        (
+            index
+            for index, event in enumerate(events)
+            if event == ("sleep", 3)
+            and (click_index is None or index < click_index)
+        ),
+        None
     )
-    print(
-        "----------------------------------------"
+
+    record_index = next(
+        (
+            index
+            for index, event in enumerate(events)
+            if event == (
+                "record_preaccess_time",
+                "クリック"
+            )
+        ),
+        None
     )
 
-    test1 = (
-        improved1_2.REQUEST_INTERVAL
-        == 3
-    )
-
-    if test1:
-
-        print(
-            "OK: REQUEST_INTERVALは3秒です。"
-        )
-
-    else:
-
-        print(
-            "NG: REQUEST_INTERVALが"
-            "3秒ではありません。"
-        )
-
-
-    # ========================================================
-    # clickの位置を取得
-    # ========================================================
-
-    click_index = None
-
-    for index, event in enumerate(events):
-
-        if event[0] == "click":
-
-            click_index = index
-
-            break
-
-
-    # ========================================================
-    # clickより前にあるsleep(3)を探す
-    # ========================================================
-
-    sleep_before_click_index = None
-
-    if click_index is not None:
-
-        for index, event in enumerate(
-            events[:click_index]
-        ):
-
-            if (
-                event[0] == "sleep"
-                and event[1] >= 3
-            ):
-
-                sleep_before_click_index = index
-
-
-    # ========================================================
-    # テスト2
-    # click()より前に3秒待機しているか
-    # ========================================================
-
-    print()
-    print(
-        "----------------------------------------"
-    )
-    print(
-        "テスト2: click()前の3秒待機"
-    )
-    print(
-        "----------------------------------------"
-    )
+    test1 = program.REQUEST_INTERVAL == 3
 
     test2 = (
-        sleep_before_click_index
-        is not None
-    )
-
-    if test2:
-
-        print(
-            "OK: click()より前に"
-            "3秒待機しています。"
-        )
-
-    else:
-
-        print(
-            "NG: click()より前の"
-            "3秒待機を確認できません。"
-        )
-
-
-    # ========================================================
-    # record_preaccess_time の位置
-    # ========================================================
-
-    record_index = None
-
-    for index, event in enumerate(events):
-
-        if (
-            event[0]
-            == "record_preaccess_time"
-        ):
-
-            record_index = index
-
-            break
-
-
-    # ========================================================
-    # テスト3
-    # sleep → record の順番
-    # ========================================================
-
-    print()
-    print(
-        "----------------------------------------"
-    )
-    print(
-        "テスト3: 待機後にアクセス直前時間を記録"
-    )
-    print(
-        "----------------------------------------"
+        sleep_index is not None
+        and click_index is not None
+        and sleep_index < click_index
     )
 
     test3 = (
-        sleep_before_click_index
-        is not None
+        sleep_index is not None
         and record_index is not None
-        and sleep_before_click_index
-        < record_index
-    )
-
-    if test3:
-
-        print(
-            "OK: 3秒待機の後に"
-            "アクセス直前時間を記録しています。"
-        )
-
-    else:
-
-        print(
-            "NG: 処理順序が違います。"
-        )
-
-
-    # ========================================================
-    # テスト4
-    # sleep → record → click の順番
-    # ========================================================
-
-    print()
-    print(
-        "----------------------------------------"
-    )
-    print(
-        "テスト4: 全体の処理順序"
-    )
-    print(
-        "----------------------------------------"
+        and sleep_index < record_index
     )
 
     test4 = (
-        sleep_before_click_index
-        is not None
+        sleep_index is not None
         and record_index is not None
         and click_index is not None
-        and sleep_before_click_index
-        < record_index
-        < click_index
+        and sleep_index < record_index < click_index
+        and element.click.call_count == 1
+        and result == TARGET_URL
     )
-
-    if test4:
-
-        print(
-            "OK: 処理順序は"
-        )
-
-        print(
-            "3秒待機"
-        )
-
-        print(
-            "↓"
-        )
-
-        print(
-            "アクセス直前時間を記録"
-        )
-
-        print(
-            "↓"
-        )
-
-        print(
-            "click()"
-        )
-
-        print(
-            "です。"
-        )
-
-    else:
-
-        print(
-            "NG: 正しい順序ではありません。"
-        )
-
-
-    # ========================================================
-    # 最終結果
-    # ========================================================
 
     print()
-    print(
-        "========================================"
-    )
-    print(
-        "最終結果"
-    )
-    print(
-        "========================================"
-    )
+    print("========================================")
+    print("確認結果")
+    print("========================================")
 
-    success_count = sum(
-        [
-            test1,
-            test2,
-            test3,
-            test4
-        ]
-    )
+    results = [
+        ("待機時間の設定が3秒", test1),
+        ("click()より前にsleep(3)", test2),
+        ("待機後にアクセス直前時間を記録", test3),
+        ("sleep → 記録 → clickの順序", test4),
+    ]
 
-    print(
-        f"{success_count}/4 テスト成功"
-    )
+    for name, passed in results:
+        print(f"{name}: {'OK' if passed else 'NG'}")
+
+    success_count = sum(passed for _, passed in results)
+
+    print()
+    print("========================================")
+    print("最終結果")
+    print("========================================")
+    print(f"{success_count}/4 テスト成功")
 
     if success_count == 4:
-
-        print()
-        print(
-            "すべてのテストに成功しました。"
-        )
-
-        print()
-        print(
-            "Seleniumによる店舗ホームページへの"
-        )
-
-        print(
-            "クリックでは、アクセスを発生させる"
-        )
-
-        print(
-            "click()より前に3秒待機することを"
-        )
-
-        print(
-            "確認しました。"
-        )
-
+        print("すべてのテストに成功しました。")
     else:
-
-        print()
-        print(
-            "テストに失敗しました。"
-        )
-
+        print("テストに失敗しました。")
 
 except Exception as error:
-
     print()
-    print(
-        "========================================"
-    )
-    print(
-        "テスト中にエラーが発生しました"
-    )
-    print(
-        "========================================"
-    )
-
-    print(
-        type(error).__name__
-    )
-
-    print(
-        str(error)
-    )
+    print("テスト中にエラーが発生しました。")
+    print("エラー種類:", type(error).__name__)
+    print("エラー内容:", error)

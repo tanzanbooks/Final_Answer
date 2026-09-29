@@ -13,7 +13,23 @@
 
 from bs4 import BeautifulSoup
 
-from improved1_1 import get_shop_url
+from pathlib import Path
+import importlib.util
+
+program_file = (
+    Path(__file__).resolve().parent.parent
+    / "ex1_web-scraping"
+    / "1-1.py"
+)
+
+spec = importlib.util.spec_from_file_location("program_1_1", program_file)
+if spec is None or spec.loader is None:
+    raise ImportError(f"読み込めません: {program_file}")
+
+program = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(program)
+
+get_shop_url = program.get_shop_url
 
 
 # ============================================================

@@ -1,193 +1,124 @@
 """
-1-1.csvが「空欄行を追加した50行」ではなく、
-実際に取得できた50店舗分のデータになっているか確認するテスト。
-
-確認内容
-1. データ行が50行ある
-2. 完全な空欄行がない
-3. 店舗名が空欄の行がない
-4. URLが空欄の行がない
-5. URLが "#" ではない
-6. URLが "javascript:" ではない
+1-1.csvが空欄行で埋められた50行ではなく、
+50店舗分のデータになっているか確認するテスト。
 """
+
+from pathlib import Path
 
 import pandas as pd
 
 
 # ==================== 1. 設定 ====================
 
-CSV_FILE = "1-1.csv"
-
+TEST_DIR = Path(__file__).resolve().parent
+CSV_FILE = TEST_DIR.parent / "ex1_web-scraping" / "1-1.csv"
 TARGET_COUNT = 50
+
+if not CSV_FILE.is_file():
+    raise FileNotFoundError(
+        f"1-1.csvが見つかりません: {CSV_FILE}"
+    )
 
 
 # ==================== 2. CSVを読み込む ====================
 
-df = pd.read_csv(
-    CSV_FILE,
-    encoding="utf-8-sig"
-)
+df = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
 
+for column in ("店舗名", "URL"):
+    if column not in df.columns:
+        raise ValueError(
+            f"CSVに必要な列「{column}」がありません: {CSV_FILE}"
+        )
 
 print("===== 50店舗取得テスト =====")
+print("確認するCSV:", CSV_FILE)
 print()
 
 
-# ==================== 3. 行数を確認 ====================
+# ==================== 3. 行数 ====================
 
 row_count = len(df)
+print(f"CSVのデータ行数: {row_count}")
 
-print(
-    f"CSVのデータ行数: {row_count}"
+
+# ==================== 4. 完全な空欄行 ====================
+
+# NaNだけでなく、空文字や空白だけのセルも空欄とみなす
+text_df = df.fillna("").astype(str).apply(
+    lambda column: column.str.strip()
 )
 
-
-# ==================== 4. 完全な空欄行を確認 ====================
-
-blank_rows = df[
-    df.isna().all(axis=1)
-]
-
+blank_rows = df[text_df.eq("").all(axis=1)]
 blank_row_count = len(blank_rows)
 
-print(
-    f"完全な空欄行: {blank_row_count}"
-)
+print(f"完全な空欄行: {blank_row_count}")
 
 
-# ==================== 5. 店舗名の空欄を確認 ====================
+# ==================== 5. 店舗名の空欄 ====================
 
-shop_name = (
-    df["店舗名"]
-    .fillna("")
-    .astype(str)
-    .str.strip()
-)
-
-blank_shop_rows = df[
-    shop_name == ""
-]
-
+shop_name = text_df["店舗名"]
+blank_shop_rows = df[shop_name.eq("")]
 blank_shop_count = len(blank_shop_rows)
 
-print(
-    f"店舗名が空欄の行: {blank_shop_count}"
-)
+print(f"店舗名が空欄の行: {blank_shop_count}")
 
 
-# ==================== 6. URLの空欄を確認 ====================
+# ==================== 6. URLの空欄・不正値 ====================
 
-url = (
-    df["URL"]
-    .fillna("")
-    .astype(str)
-    .str.strip()
-)
+url = text_df["URL"]
 
-blank_url_rows = df[
-    url == ""
-]
-
+blank_url_rows = df[url.eq("")]
 blank_url_count = len(blank_url_rows)
 
-print(
-    f"URLが空欄の行: {blank_url_count}"
-)
-
-
-# ==================== 7. "#" のURLを確認 ====================
-
-hash_url_rows = df[
-    url == "#"
-]
-
+hash_url_rows = df[url.eq("#")]
 hash_url_count = len(hash_url_rows)
 
-print(
-    f"URLが # の行: {hash_url_count}"
-)
-
-
-# ==================== 8. javascript: のURLを確認 ====================
-
 javascript_rows = df[
-    url.str.lower().str.startswith(
-        "javascript:"
-    )
+    url.str.lower().str.startswith("javascript:")
 ]
+javascript_count = len(javascript_rows)
 
-javascript_count = len(
-    javascript_rows
-)
-
-print(
-    f"javascript: のURL: {javascript_count}"
-)
+print(f"URLが空欄の行: {blank_url_count}")
+print(f"URLが # の行: {hash_url_count}")
+print(f"javascript: のURL: {javascript_count}")
 
 
-# ==================== 9. 最終判定 ====================
+# ==================== 7. 最終判定 ====================
 
-print()
-print("----------------------------------------")
-
-
-if (
+passed = (
     row_count == TARGET_COUNT
     and blank_row_count == 0
     and blank_shop_count == 0
     and blank_url_count == 0
     and hash_url_count == 0
     and javascript_count == 0
-):
+)
 
-    print("テスト結果: OK")
+print()
+print("----------------------------------------")
+print("テスト結果:", "OK" if passed else "NG")
 
+if passed:
     print(
-        "空欄行で50行にせず、"
-        "有効な50店舗分のデータが保存されています。"
+        "50行すべてに店舗名とURLがあり、"
+        "空欄行・#・javascript: URLはありません。"
     )
-
 else:
-
-    print("テスト結果: NG")
-
-    print(
-        "50店舗取得の条件を満たしていません。"
-    )
+    print("上記のいずれかの条件を満たしていません。")
 
 
-# ==================== 10. 問題行を表示 ====================
+# ==================== 8. 問題行を表示 ====================
 
-if blank_row_count > 0:
+problem_groups = [
+    ("完全な空欄行", blank_rows),
+    ("店舗名が空欄の行", blank_shop_rows),
+    ("URLが空欄の行", blank_url_rows),
+    ("URLが # の行", hash_url_rows),
+    ("javascript: のURL", javascript_rows),
+]
 
-    print()
-    print("【完全な空欄行】")
-    print(blank_rows)
-
-
-if blank_shop_count > 0:
-
-    print()
-    print("【店舗名が空欄の行】")
-    print(blank_shop_rows)
-
-
-if blank_url_count > 0:
-
-    print()
-    print("【URLが空欄の行】")
-    print(blank_url_rows)
-
-
-if hash_url_count > 0:
-
-    print()
-    print("【URLが # の行】")
-    print(hash_url_rows)
-
-
-if javascript_count > 0:
-
-    print()
-    print("【javascript: のURL】")
-    print(javascript_rows)
+for label, rows in problem_groups:
+    if not rows.empty:
+        print()
+        print(f"【{label}】")
+        print(rows.to_string(index=True))
